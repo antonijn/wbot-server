@@ -10,3 +10,21 @@ max_concurrent_users = 2
 solve_timeout = 5000
 coach_timeout = 4000
 ```
+
+## Example systemd service file
+```ini
+[Unit]
+Description=Wordsmith web server
+After=network.target nss-lookup.target
+
+[Service]
+Type=simple
+User=wordsmith
+Group=wordsmith
+ExecStart=/usr/local/bin/wbot-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```

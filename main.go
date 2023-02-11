@@ -4,21 +4,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/pelletier/go-toml/v2"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 	"unicode"
-	"github.com/google/uuid"
-	"github.com/pelletier/go-toml/v2"
 )
 
 var engine Engine
 var globalConfigPath = "/etc/wbot/server.conf"
 
 type ServerConfig struct {
-	Engine BotConfig `toml:"engine"`
+	Port int `toml:"port"`
+}
+
+type ConfigFile struct {
+	Server ServerConfig `toml:"server"`
+	Engine BotConfig    `toml:"engine"`
 }
 
 var words []string
@@ -42,7 +47,7 @@ func wordValid(word string) bool {
 		return false
 	}
 
-    for _, c := range word {
+	for _, c := range word {
 		if !unicode.IsLetter(c) || c > unicode.MaxASCII {
 			return false
 		}
@@ -146,8 +151,7 @@ func coachWord(w http.ResponseWriter, r *http.Request) {
 	log.Printf("(uuid=%v) /coach done, took %v\n", id, time.Since(start))
 }
 
-
-func loadConfig() (config *ServerConfig, err error) {
+func loadConfig() (config *ConfigFile, err error) {
 	log.Printf("Reading server config at %s", globalConfigPath)
 
 	tomlFile, err := os.Open(globalConfigPath)
@@ -156,7 +160,11 @@ func loadConfig() (config *ServerConfig, err error) {
 	}
 	defer tomlFile.Close()
 
-	config = &ServerConfig{}
+	config = &ConfigFile{
+		Server: ServerConfig{
+			Port: 8080,
+		},
+	}
 
 	decode := toml.NewDecoder(tomlFile)
 	if err = decode.Decode(config); err != nil {
@@ -191,5 +199,5 @@ func main() {
 	http.HandleFunc("/solve", solveWord)
 	http.HandleFunc("/coach", coachWord)
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", config.Server.Port), nil))
 }

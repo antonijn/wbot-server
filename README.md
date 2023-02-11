@@ -2,6 +2,8 @@
 
 ```toml
 # /etc/wbot/server.conf
+[server]
+port = 8080
 
 [engine]
 exec_path = "/usr/local/bin/wordsmith"
@@ -13,6 +15,7 @@ coach_timeout = 4000
 
 ## Example systemd service file
 ```ini
+# /etc/systemd/system/wbot-server.service
 [Unit]
 Description=Wordsmith web server
 After=network.target nss-lookup.target

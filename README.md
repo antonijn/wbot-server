@@ -31,3 +31,27 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+## Example nginx config
+```nginx
+# /etc/nginx/sites-available/wbot
+server {
+	listen 80;
+
+	server_name WBot;
+	root /var/www/static;
+
+	location / {
+		# First attempt to serve request as file, then
+		# as directory, then fall back to displaying a 404.
+		try_files $uri $uri/ =404;
+	}
+
+	location /api/ {
+		# Pass along to wbot-server on port 8080
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_pass http://127.0.0.1:8080/;
+	}
+}
+```

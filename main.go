@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/pelletier/go-toml/v2"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/google/uuid"
+	"github.com/pelletier/go-toml/v2"
 )
 
 var engine Engine
@@ -58,7 +59,17 @@ func wordValid(word string) bool {
 
 func internalError(w http.ResponseWriter, err error, id uuid.UUID) {
 	log.Printf("(uuid=%v) error: %v\n", id, err)
-	http.Error(w, fmt.Sprint(id), http.StatusInternalServerError)
+	status := http.StatusInternalServerError
+	if _, ok := err.(TimeoutError); ok {
+		status = http.StatusServiceUnavailable
+	}
+	msg := fmt.Sprintf(
+		"%d - %s\nThe developers will know what to do with this: %v",
+		status,
+		http.StatusText(status),
+		id,
+	)
+	http.Error(w, msg, status)
 }
 
 func getIP(r *http.Request) string {
@@ -68,6 +79,13 @@ func getIP(r *http.Request) string {
 	}
 
 	return r.RemoteAddr
+}
+
+func writeJSON(w http.ResponseWriter, data any, id uuid.UUID) {
+	w.Header().Add("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		internalError(w, err, id)
+	}
 }
 
 func solveWord(w http.ResponseWriter, r *http.Request) {
@@ -94,9 +112,7 @@ func solveWord(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		internalError(w, err, id)
 	} else {
-		if err := json.NewEncoder(w).Encode(data); err != nil {
-			internalError(w, err, id)
-		}
+		writeJSON(w, data, id)
 	}
 
 	log.Printf("(uuid=%v) /solve done, took %v", id, time.Since(start))
@@ -142,10 +158,7 @@ func coachWord(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		internalError(w, err, id)
 	} else {
-		output := []WordReport{*data}
-		if err := json.NewEncoder(w).Encode(output); err != nil {
-			internalError(w, err, id)
-		}
+		writeJSON(w, data, id)
 	}
 
 	log.Printf("(uuid=%v) /coach done, took %v\n", id, time.Since(start))
@@ -160,11 +173,7 @@ func loadConfig() (config *ConfigFile, err error) {
 	}
 	defer tomlFile.Close()
 
-	config = &ConfigFile{
-		Server: ServerConfig{
-			Port: 8080,
-		},
-	}
+	config = &ConfigFile{Server: ServerConfig{Port: 8080}}
 
 	decode := toml.NewDecoder(tomlFile)
 	if err = decode.Decode(config); err != nil {
@@ -184,10 +193,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	engine, err = NewBot(config.Engine)
+	bot, err := NewBot(config.Engine)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer bot.Close()
+	engine = bot
 
 	log.Println("Loading words")
 	words, err = engine.WordList()

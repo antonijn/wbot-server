@@ -41,7 +41,13 @@ type BotConfig struct {
 
 type Bot struct {
 	config BotConfig
-	work chan func()
+	work   chan func()
+}
+
+type TimeoutError string
+
+func (err TimeoutError) Error() string {
+	return string(err)
 }
 
 func (config BotConfig) validateExec() error {
@@ -67,44 +73,38 @@ func (config BotConfig) validateExec() error {
 	return nil
 }
 
-func spawnWorker(work <-chan func()) {
-	go func() {
-		for {
-			f, ok := <-work
-			if !ok {
-				break
-			}
-			f()
+func NewBot(config BotConfig) (bot *Bot, err error) {
+	err = config.validateExec()
+	if err == nil {
+		bot = &Bot{config: config, work: make(chan func())}
+		for i := 0; i < config.MaxConcurrentUsers; i++ {
+			go bot.worker()
 		}
-	}()
-}
-
-func NewBot(config BotConfig) (*Bot, error) {
-	if err := config.validateExec(); err != nil {
-		return nil, err
 	}
 
-	work := make(chan func())
-	for i := 0; i < config.MaxConcurrentUsers; i++ {
-		spawnWorker(work)
-	}
-	return &Bot{config: config, work: work}, nil
+	return
 }
 
 func (b *Bot) Close() {
 	close(b.work)
 }
 
-func (b *Bot) command(timeout int, args ...string) (*exec.Cmd, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
-	cmd := exec.CommandContext(ctx, b.config.ExecPath, args...)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("WORDSMITH_INDEX=%s", b.config.IndexPath))
-	return cmd, cancel
+func (bot *Bot) worker() {
+	for {
+		f, ok := <-bot.work
+		if !ok {
+			break
+		}
+		f()
+	}
 }
 
 func (b *Bot) execAtom(timeout int, v any, args ...string) error {
-	cmd, cancel := b.command(timeout, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
 	defer cancel()
+
+	cmd := exec.CommandContext(ctx, b.config.ExecPath, args...)
+	cmd.Env = append(cmd.Env, fmt.Sprintf("WORDSMITH_INDEX=%s", b.config.IndexPath))
 
 	reader, err := cmd.StdoutPipe()
 	if err != nil {
@@ -119,6 +119,9 @@ func (b *Bot) execAtom(timeout int, v any, args ...string) error {
 	}
 
 	if err := decoder.Decode(v); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return TimeoutError("timeout")
+		}
 		return err
 	}
 
@@ -140,7 +143,7 @@ func (b *Bot) exec(timeout int, v any, args ...string) (err error) {
 		return
 
 	case <- time.After(time.Duration(timeout) * time.Millisecond):
-		err = fmt.Errorf("timeout waiting for resources")
+		err = TimeoutError("timeout waiting for resources")
 		return
 	}
 }
